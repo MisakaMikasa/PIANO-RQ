@@ -10,7 +10,7 @@ import torch
 
 def test_main(num_nodes):
     node_count = num_nodes
-    input_file = 'C:\\Users\\17789\\Desktop\\New Graph Dataset\\p2p(1).txt'
+    input_file = 'C:\\Users\\17789\\Desktop\\New Graph Dataset\\p2p(2).txt'
     adj_list = {}
 
     for i in range(node_count+1): adj_list[i]= []

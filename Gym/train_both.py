@@ -17,7 +17,7 @@ while t < 10 :
       bfs_sample(input_txt, output_txt, start_node, max_node)
 
       start_time = time.time()
-      DDPG_main(max_node)
+      #DDPG_main(max_node)
       end_time1 = time.time()
 
       DQN_main(max_node)

@@ -5,7 +5,6 @@ import torch.optim as optim
 import torch.nn.functional as F
 import random
 import os
-import numpy as np
 from collections import deque
 
 from custom_graph import Graph
@@ -15,12 +14,15 @@ from simulator import simulate
 from simulator import celf
 import torch.nn.utils as nn_utils
 
-# ——— hyperparameters ———
-REPLAY_CAPACITY = 64    
+# hyperparameters
+REPLAY_CAPACITY = 2000
 GAMMA           = 0.99
-LR              = 1e-4  
-EPSILON         = 0.20
-TAU             = 0.005  
+LR              = 1e-5
+EPSILON         = 0.1
+
+# clamp range
+CLAMP_LOW  = -1.0
+CLAMP_HIGH =  1.0
 
 
 class QNet(nn.Module):
@@ -28,43 +30,42 @@ class QNet(nn.Module):
         super().__init__()
         self.embed_dim = embed_dim
 
-        # initialize to ones instead of random
-        self.beta1 = nn.Parameter(torch.ones(embed_dim, 1))
-        self.beta2 = nn.Parameter(torch.ones(1))
-        self.beta3 = nn.Parameter(torch.ones(1))
+        # Trainable parameters
+        self.beta1 = nn.Parameter(torch.rand(embed_dim, 1))
+        self.beta2 = nn.Parameter(torch.rand(1))
+        self.beta3 = nn.Parameter(torch.rand(1))
 
         self.fc = nn.Linear(embed_dim * 2, 1)
+        
         self.fc = nn_utils.weight_norm(self.fc)
         nn.init.xavier_normal_(self.fc.weight_v)
 
     def forward(self, node_embed, agg_embed):
-        # L2 normalize each
-        agg_n = F.normalize(agg_embed, p=2, dim=1)
-        node_n = F.normalize(node_embed, p=2, dim=1)
-
-        scaled_agg  = self.beta2 * agg_n
-        # add tiny noise to avoid exact zero
-        scaled_node = self.beta3 * node_n + torch.rand(1, device=node_n.device) * 1e-10
-
-        combined = torch.cat((scaled_agg, scaled_node), dim=1)
+        scaled_agg  = self.beta2 * agg_embed
+        scaled_node = self.beta3 * node_embed
+        combined    = torch.cat((scaled_agg, scaled_node), dim=1)
         return self.fc(F.relu(combined))
+
+
 
 class DQNAgent:
     def __init__(self, embed_dim=64):
         self.replay_buffer = deque(maxlen=REPLAY_CAPACITY)
         self.embed_dim     = embed_dim
 
-        # shared alphas now start at 1
-        self.alpha1 = nn.Parameter(torch.ones(1))
-        self.alpha2 = nn.Parameter(torch.ones(1))
-        self.alpha3 = nn.Parameter(torch.ones(1))
-        self.alpha4 = nn.Parameter(torch.ones(1))
+        
+
+        # shared alphas (for your graph‐embedding)
+        self.alpha1 = nn.Parameter(torch.rand(1))
+        self.alpha2 = nn.Parameter(torch.rand(1))
+        self.alpha3 = nn.Parameter(torch.rand(1))
+        self.alpha4 = nn.Parameter(torch.rand(1))
         self.shared_alphas = [self.alpha1, self.alpha2, self.alpha3, self.alpha4]
 
         self.q_network = QNet(embed_dim)
         self.q_target  = QNet(embed_dim)
         self.q_target.load_state_dict(self.q_network.state_dict())
-        for p in self.q_target.parameters(): p.requires_grad = False
+
 
         self.optimizer = optim.Adam(
             list(self.q_network.parameters()) + self.shared_alphas,
@@ -73,58 +74,56 @@ class DQNAgent:
 
     def select_action(self, env, valid_nodes, epsilon):
         cur = env.embed.cur_embed
-        # use mean instead of sum
-        agg = cur.mean(dim=0, keepdim=True)
+        agg = cur.sum(dim=0)
 
-        #if random.random() < epsilon:
-            #return random.choice(valid_nodes)
+        if random.random() < epsilon:
+            return random.choice(valid_nodes)
 
         v_emb = cur[valid_nodes]
-        a_emb = agg.expand(v_emb.size(0), -1)
+        a_emb = agg.unsqueeze(0).expand(v_emb.size(0), -1)
         qv    = self.q_network(v_emb, a_emb).squeeze(1)
         return valid_nodes[qv.argmax().item()]
 
     def train(self, batch_size, gamma=GAMMA):
         if len(self.replay_buffer) < batch_size:
-            return 0
+            return
 
         batch = random.sample(self.replay_buffer, batch_size)
-        losses = []
+        total_loss = []
+        #total_loss = torch.tensor(0.0, device=self.q_network.beta2.device)
 
         for state, action, reward, next_state in batch:
-            # current Q
-            agg_s  = state.cur_embed.mean(0, keepdim=True)
-            node_s = state.cur_embed[action].unsqueeze(0)
-            q_s    = self.q_network(node_s, agg_s).squeeze(1)
+            agg_s    = state.cur_embed.sum(0, keepdim=True)
+            node_s   = state.cur_embed[action].unsqueeze(0)
+            q_s      = self.q_network(node_s, agg_s).squeeze(1)
 
-            # next Q via target network
-            agg_ns   = next_state.cur_embed.mean(0, keepdim=True)
+            agg_ns   = next_state.cur_embed.sum(0, keepdim=True)
             valid    = [v for v, lbl in enumerate(next_state.graph.labels) if lbl == 0]
-            v_emb_ns = next_state.cur_embed[valid]
-            a_emb_ns = agg_ns.expand(len(valid), -1)
+            
+            v_emb_ns   = next_state.cur_embed[valid]
+            a_emb_ns   = agg_ns.expand(len(valid), -1)
             q_next_all = self.q_target(v_emb_ns, a_emb_ns).squeeze(1).detach()
-            max_q_next = q_next_all.max() if valid else torch.tensor(0.0, device=q_s.device)
+            max_q_next = q_next_all.max()
+            
+            max_q_next = torch.tensor(0.0, device=q_s.device)
 
             target = reward + gamma * max_q_next
-            target = target.view_as(q_s)
-            losses.append(F.smooth_l1_loss(q_s, target))
+            total_loss.append(F.smooth_l1_loss(q_s.squeeze(), target))
+            #total_loss = total_loss + F.mse_loss(q_s, target.unsqueeze(0))
 
-        loss = torch.stack(losses).mean()
+        # debug print
+        
 
         self.optimizer.zero_grad()
-        loss.backward()
+        final_loss = torch.stack(total_loss).mean()
+        print(f"[DEBUG] DQN total_loss = {final_loss.item():.4f}")
+        final_loss.backward()
         torch.nn.utils.clip_grad_norm_(
             list(self.q_network.parameters()) + self.shared_alphas,
             max_norm=10
         )
         self.optimizer.step()
 
-        # — soft‐update target network —
-        for src, tgt in zip(self.q_network.parameters(), self.q_target.parameters()):
-            tgt.data.mul_(1 - TAU)
-            tgt.data.add_(src.data * TAU)
-        
-        return loss.detach().numpy()
 
     def add_experience(self, state, action, reward, next_state):
         state_copy = state.copy_emb()
@@ -171,6 +170,10 @@ class DQNAgent:
         env.reset()
         return result
     
+
+        
+
+
 def train_agent(agent, env, episodes, batch_size):
     """
     Trains the DQN agent by interacting with the CustomEnv.
@@ -185,18 +188,25 @@ def train_agent(agent, env, episodes, batch_size):
     for episode in range(episodes):
         # Reset the environment to get the initial embeddings
         env.reset()  
+
         done = False
         episode_reward = 0
+
         epsilon = 0.20
 
-        loss_list=[]
         while not done:
             # Get the valid nodes (not yet selected)
             valid_nodes = [i for i, label in enumerate(env.embed.graph.labels) if label == 0]
 
+            
+            #for i in range(env.embed.graph.num_nodes):
+            #   if (env.embed.graph.labels[i]!=1):
+            #        valid_nodes.append(i)
+
             # Select an action 
             orig_state = env.embed.copy_emb()
             action = agent.select_action(env, valid_nodes, epsilon)
+            epsilon *= 0.95
 
             # Apply the action 
             state, reward, done, _ = env.step(action)
@@ -205,14 +215,14 @@ def train_agent(agent, env, episodes, batch_size):
             agent.add_experience(orig_state, action, reward, state)
 
             # Train the agent
-            loss = agent.train(batch_size)
-            loss_list.append(loss)
+            agent.train(batch_size)
+
             episode_reward += reward
 
-        epsilon *= 0.90
+            
+        # Log episode performance
         print(f"Episode {episode + 1}/{episodes} - Total Reward: {episode_reward}")
-        print(f"Total influenced: {env.influence}")
-        print(f"Critic loss: {np.mean(loss_list).item():.4f}")
+        print(f"total influenced: {env.influence}")
 
     agent.replay_buffer.clear()
     torch.save({
@@ -222,6 +232,7 @@ def train_agent(agent, env, episodes, batch_size):
 
     
 def DQN_main(num_nodes):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     input_file = 'C:\\Users\\17789\\Desktop\\New Graph Dataset\\subgraph1.txt'
     adj_list = {}
@@ -262,7 +273,19 @@ def DQN_main(num_nodes):
     else:
         print("No pre-trained agent found. Creating a new agent...")
     env = CustomEnv(graph, agent.shared_alphas, 10)
+
+   
     train_agent(agent, env, 10, 32)    
 
+    '''
+    random_avg = 0.0
+    for i in range(20):
+        random_avg += agent.random_select(env, 10,max_node)
+
+    print(f'random result: {random_avg/20}')
+    
+    print(agent.evaluate(env, 10))
+    print(celf(graph,10))
+    '''
 
 
