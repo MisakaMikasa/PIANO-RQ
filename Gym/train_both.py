@@ -4,6 +4,8 @@ from DQN_V2 import DQN_main
 from gensubgraph2 import bfs_sample
 import time
 
+
+
 t = 0
 while t < 10 : 
 
@@ -11,8 +13,8 @@ while t < 10 :
       start_node = random.randint(1,6300)
       max_node = random.randint(300,450)
 
-      input_txt = "C:\\Users\\17789\\Desktop\\New Graph Dataset\\p2p(1).txt"
-      output_txt = "C:\\Users\\17789\\Desktop\\New Graph Dataset\\subgraph1.txt"
+      input_txt = "./New Graph Dataset/p2p(1).txt"
+      output_txt = "./New Graph Dataset/subgraph1.txt"
       print(t)
       bfs_sample(input_txt, output_txt, start_node, max_node)
 

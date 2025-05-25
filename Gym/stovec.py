@@ -23,7 +23,10 @@ class Embed(nn.Module):
     def copy_emb(self):
         new_emb = Embed(copy.deepcopy(self.graph), (self.alpha1, self.alpha2, self.alpha3, self.alpha4),
                         self.embed_dim, self.num_iterations)
-        new_emb.cur_embed = self.cur_embed.clone().detach()
+        # new_emb.cur_embed = self.cur_embed.clone().detach()
+        new_emb.cur_embed = self.cur_embed.clone()
+        # print('alpha1', self.alpha1)
+        # print('self.alpha1: ', self.alpha1.requires_grad)
         return new_emb
     
     '''

@@ -282,14 +282,14 @@ def train_agent(agent, env, episodes, batch_size, epsilon):
         'actor_state_dict': agent.actor.state_dict(),  # Save actor network
         'critic_state_dict': agent.critic.state_dict(),  # Save critic network
         'shared_alphas_state_dict': {f'alpha{i+1}': alpha for i, alpha in enumerate(agent.shared_alphas)},
-    }, 'C:\\Users\\17789\\Desktop\\New Graph Dataset\\DDPG_agent(p2p1_4c4).pth')
+    }, '/home/guoyc/code/PIANO-RQ_v4/New Graph Dataset/DDPG_agent(p2p1_4c4).pth')
 
 
     
 def DDPG_main(num_nodes):
 
 
-    input_file = 'C:\\Users\\17789\\Desktop\\New Graph Dataset\\subgraph1.txt'
+    input_file = '/home/guoyc/code/PIANO-RQ_v4/New Graph Dataset/subgraph1.txt'
     adj_list = {}
 
     # Initialize adjacency list
@@ -315,9 +315,9 @@ def DDPG_main(num_nodes):
     epsilon = 0.30  # Default exploration rate
 
     # Load pre-trained model if it exists
-    if os.path.exists('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DDPG_agent(p2p1_4c4).pth'):
+    if os.path.exists('/home/guoyc/code/PIANO-RQ_v4/New Graph Dataset/DDPG_agent(p2p1_4c4).pth'):
         print("Loading pre-trained agent...")
-        checkpoint = torch.load('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DDPG_agent(p2p1_4c4).pth')
+        checkpoint = torch.load('/home/guoyc/code/PIANO-RQ_v4/New Graph Dataset/DDPG_agent(p2p1_4c4).pth')
         
         # Load Q-network (betas and thetas included)
         agent.actor.load_state_dict(checkpoint['actor_state_dict'])
